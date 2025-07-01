@@ -47,8 +47,9 @@ public:
     bool black_kingside_castle = true;
     bool black_queenside_castle = true;
 
+	void setup_initial_position();
+
 private:
     BoardArray squares_;
     std::optional<std::pair<int, int>> en_passant_target;
-    void setup_initial_position();
 };

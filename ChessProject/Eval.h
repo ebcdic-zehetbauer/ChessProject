@@ -1,6 +1,11 @@
 #pragma once
 #include "Board.h"
 #include "Move.h"
+#include <vector>
+#include <tuple>
+#include <memory>
+#include <atomic>
+#include <mutex>
 
 // Material values
 constexpr int piece_value(PieceType type) {
@@ -30,4 +35,14 @@ constexpr int pawn_table[8][8] = {
 
 int evaluate_board(const Board& board, Color side_to_move);
 int minimax(Board& board, Color side_to_move, int depth, bool maximizingPlayer);
+
 Move select_best_move(const Board& board, Color side_to_move, int depth);
+
+class MoveSelector {
+public:
+    MoveSelector(int num_threads = std::thread::hardware_concurrency());
+    Move select_best_move(const Board& board, Color side_to_move, int depth);
+
+private:
+    int num_threads_;
+};

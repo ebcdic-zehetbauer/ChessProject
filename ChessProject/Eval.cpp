@@ -1,7 +1,13 @@
 #include "Eval.h"
 #include "MoveGen.h"
 #include "Move.h"
+#include <algorithm>
 #include <stdexcept>
+#include <future>
+#include <thread>
+#include <vector>
+#include <latch>
+#include <mutex>
 
 int evaluate_board(const Board& board, Color side_to_move) {
     int score = 0;
@@ -60,22 +66,46 @@ int minimax(Board& board, Color side_to_move, int depth, bool maximizingPlayer) 
     return bestEval;
 }
 
-Move select_best_move(const Board& board, Color side_to_move, int depth) {
+MoveSelector::MoveSelector(int num_threads)
+    : num_threads_(num_threads > 0 ? num_threads : 1) {}
+
+Move MoveSelector::select_best_move(const Board& board, Color side_to_move, int depth) {
     auto result = generate_legal_moves(&board, side_to_move);
     if (!result || result->empty()) throw std::runtime_error("No legal moves");
 
-    int bestEval = -1000000;
-    Move bestMove = (*result)[0];
-    for (const auto& move : *result) {
-        Board next_board = board;
-        apply_move(next_board, move);
-        int eval = minimax(next_board, side_to_move, depth - 1, false);
-        if (eval > bestEval) {
-            bestEval = eval;
-            bestMove = move;
+    const auto& moves = *result;
+    std::vector<std::tuple<int, Move>> evals;
+    std::mutex evals_mutex; // Mutex to protect evals
+    std::atomic<size_t> next_idx{0};
+    std::latch done_latch(num_threads_);
+
+    auto worker = [&]() {
+        while (true) {
+            size_t idx = next_idx.fetch_add(1);
+            if (idx >= moves.size()) break;
+            Board next_board = board;
+            apply_move(next_board, moves[idx]);
+            int eval = minimax(next_board, side_to_move, depth - 1, false);
+            auto tuple = std::make_tuple(eval, moves[idx]);
+            {
+                std::lock_guard<std::mutex> lock(evals_mutex);
+                evals.push_back(std::move(tuple)); // Thread-safe push_back
+            }
         }
+        done_latch.count_down();
+    };
+
+    std::vector<std::jthread> threads;
+    threads.reserve(num_threads_);
+    for (int i = 0; i < num_threads_; ++i) {
+        threads.emplace_back(worker);
     }
-    return bestMove;
+    done_latch.wait();
+
+    auto best = std::max_element(evals.begin(), evals.end(),
+        [](const auto& a, const auto& b) { return std::get<0>(a) < std::get<0>(b); });
+
+    return std::get<1>(*best);
 }
 
 /*
